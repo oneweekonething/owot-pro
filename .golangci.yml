@@ -1,0 +1,72 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - depguard
+  settings:
+    depguard:
+      rules:
+        domain_stdlib_only:
+          list-mode: strict
+          files:
+            - "**/internal/*/domain/*.go"
+            - "**/internal/*/domain/**/*.go"
+          allow:
+            - "$gostd"
+        pure_platform_stdlib_only:
+          list-mode: strict
+          files:
+            - "**/internal/platform/ctxmeta/*.go"
+            - "**/internal/platform/pagination/*.go"
+          allow:
+            - "$gostd"
+        app_restricted_imports:
+          list-mode: strict
+          files:
+            - "**/internal/*/app/*.go"
+            - "**/internal/*/app/**/*.go"
+          allow:
+            - "$gostd"
+            - "oneweekonething.com/owot-pro/internal/iam/domain"
+            - "oneweekonething.com/owot-pro/internal/system/domain"
+            - "oneweekonething.com/owot-pro/internal/infra/domain"
+            - "oneweekonething.com/owot-pro/internal/platform/ctxmeta"
+            - "oneweekonething.com/owot-pro/internal/platform/pagination"
+        platform_no_domain:
+          files:
+            - "**/internal/platform/*.go"
+            - "**/internal/platform/**/*.go"
+          deny:
+            - pkg: "oneweekonething.com/owot-pro/internal/iam"
+              desc: "platform 层严禁反向依赖 iam 领域"
+            - pkg: "oneweekonething.com/owot-pro/internal/system"
+              desc: "platform 层严禁反向依赖 system 领域"
+            - pkg: "oneweekonething.com/owot-pro/internal/infra"
+              desc: "platform 层严禁反向依赖 infra 领域"
+        adapter_http_no_other_adapters:
+          files:
+            - "**/internal/*/adapter/http/*.go"
+            - "**/internal/*/adapter/http/**/*.go"
+          deny:
+            - pkg: "oneweekonething.com/owot-pro/internal/iam/adapter/persistence"
+              desc: "adapter/http 严禁直接导入 adapter/persistence"
+            - pkg: "oneweekonething.com/owot-pro/internal/iam/adapter/cache"
+              desc: "adapter/http 严禁直接导入 adapter/cache"
+            - pkg: "oneweekonething.com/owot-pro/internal/iam/adapter/security"
+              desc: "adapter/http 严禁直接导入 adapter/security"
+            - pkg: "oneweekonething.com/owot-pro/internal/system/adapter/persistence"
+              desc: "adapter/http 严禁直接导入 adapter/persistence"
+            - pkg: "oneweekonething.com/owot-pro/internal/infra/adapter/persistence"
+              desc: "adapter/http 严禁直接导入 adapter/persistence"
+            - pkg: "oneweekonething.com/owot-pro/internal/infra/adapter/storage"
+              desc: "adapter/http 严禁直接导入 adapter/storage"

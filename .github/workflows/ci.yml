@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  GOLANGCI_LINT_VERSION: v2.4.0
+
+jobs:
+  check:
+    name: Build, Vet, Lint, Unit Test & Arch Guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install golangci-lint (${{ env.GOLANGCI_LINT_VERSION }})
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin ${{ env.GOLANGCI_LINT_VERSION }}
+          golangci-lint --version
+      - name: Run standard checks (fmt, vet, test, race, lint, build)
+        run: make check
+
+  integration:
+    name: Real MySQL & Redis Integration Test
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: owot_pro_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run integration tests against real MySQL & Redis
+        env:
+          OWOT_RUN_INTEGRATION: "1"
+          OWOT_TEST_MYSQL_DSN: "root:root@tcp(127.0.0.1:3306)/owot_pro_test?charset=utf8mb4&parseTime=true&loc=Local"
+          OWOT_TEST_REDIS_ADDR: "127.0.0.1:6379"
+        run: make test-integration
