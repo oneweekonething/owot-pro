@@ -1,0 +1,21 @@
+# Build and test artifacts
+/bin/
+/coverage/
+/coverage.out
+/coverage.html
+*.test
+*.prof
+
+# Local environment; keep configuration examples
+/.env
+/.env.*
+!/.env.example
+!/.env.*.example
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+/.idea/
+*.swp
+*.swo
+*~
