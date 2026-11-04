@@ -6,6 +6,7 @@
 ## 快速导航
 - **AI 与开发者全局规则**：[AGENTS.md](AGENTS.md)
 - **工程设计文档总览**：[docs/README.md](docs/README.md)
+- **System 模块启动与接入**：[docs/development/SYSTEM_IMPLEMENTATION.md](docs/development/SYSTEM_IMPLEMENTATION.md)
 - **架构与目录规范**：[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)
 - **平台层设计规范**：[docs/architecture/PLATFORM.md](docs/architecture/PLATFORM.md)
 - **业务领域设计**：

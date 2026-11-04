@@ -71,3 +71,4 @@ owot-pro/
 | 对接前端路由、分页、毫秒时间戳、错误码 | [`development/API_CONVENTIONS.md`](development/API_CONVENTIONS.md) |
 | 修改表结构、多租户白名单、Outbox 表、数据权限字段映射 | [`database/DATABASE.md`](database/DATABASE.md) |
 | 编写单测、真实 MySQL/Redis 集成测试、E2E 验收与跑 CI | [`testing/TESTING.md`](testing/TESTING.md) |
+| 运行已实现的 System 模块、初始化字典与接入认证接口 | [`development/SYSTEM_IMPLEMENTATION.md`](development/SYSTEM_IMPLEMENTATION.md) |
