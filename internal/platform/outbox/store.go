@@ -98,7 +98,7 @@ func (s *Store) Publish(ctx context.Context, topic string, payload []byte) error
 // Run belongs to the composition root's lifecycle. Delivery is at least once;
 // consumers must deduplicate side effects by Event.ID.
 func (s *Store) Run(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
@@ -148,7 +148,9 @@ func (s *Store) deliver(ctx context.Context) (bool, error) {
 		deliveryErr = s.broadcast.Broadcast(ctx, Event{ID: row.ID, Topic: row.Topic, TenantID: row.TenantID, Payload: json.RawMessage(row.Payload)})
 		updates := map[string]any{"status": 1}
 		if deliveryErr != nil {
-			delay := time.Second * time.Duration(1<<min(row.RetryCount+1, 5))
+			// Bound retries as well as polling so a recovered broadcaster can
+			// replay permission revocations inside the two-second contract.
+			delay := 500 * time.Millisecond * time.Duration(1<<min(row.RetryCount, 1))
 			updates = map[string]any{"retry_count": row.RetryCount + 1, "next_retry_time": time.Now().Add(delay)}
 		}
 		return tx.Model(&eventPO{}).Where("id = ?", row.ID).Updates(updates).Error

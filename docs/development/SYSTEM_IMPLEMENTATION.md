@@ -16,8 +16,8 @@ go run ./cmd/api -migrate -seed -check
 go run ./cmd/api -addr :48080
 ```
 
-- `-migrate` 显式初始化开发表；生产环境应先执行 `migrations/mysql/001_system.sql`。
-- `-seed` 初始化缺失的 5 类基础字典，可重复运行，保留已有名称、状态和数据项修改。
+- `-migrate` 显式初始化开发表；生产环境应依次执行 `migrations/mysql/001_system.sql`、`002_iam.sql`。
+- `-seed` 初始化缺失的 9 类基础字典（含 IAM 性别、数据权限、角色与菜单枚举）及 IAM 默认数据，可重复运行，保留已有名称、状态和数据项修改。
 - `-check` 校验连接、表存在性与依赖组装后退出；不会启动监听与 Relay。
 - 不配置 MySQL/Redis 时保留原来的健康检查模式；只配置其中一项会报错。
 - 配置通过环境变量读取，程序不会自动加载 `.env`。数据库时间统一存储为 UTC，前端字符串时间区间按 Asia/Shanghai 解析。
@@ -35,12 +35,12 @@ Compose 使用独立项目 `owot-system-tests`，端口为本机 `13306`（MySQL
 
 ## 认证与领域接入
 
-当前仓库尚未实现 IAM。`httpx.Dependencies` 提供 `TokenVerifier`、`PermissionChecker`、`TenantValidator` 三个消费方接口，后续由 Composition Root 注入 IAM 实现。未注入时管理接口返回业务码 `401`，不会凭客户端传入的用户或租户信息放行。静态 Token 替身只存在于测试代码。
+IAM 已通过 Composition Root 注入 `TokenVerifier`、`PermissionChecker`、`TenantValidator` 与 `DataPermissionProvider`，启动与初始账号见 [IAM_IMPLEMENTATION.md](IAM_IMPLEMENTATION.md)。测试中保留未注入安全端口的场景，确保管理接口返回 `401`。静态 Token 替身只存在于测试代码。
 
 - `/app-api/system/dict-data/type` 公开访问且忽略租户，仅返回启用类型下的启用数据项。
 - 管理接口校验 Token 用户类型为 Admin=1、`tenant-id` 与登录租户一致，并检查具体权限。
 - `visit-tenant-id` 仅允许由可信认证实现标记的超级管理员使用。
-- `app.UserNicknameReader` 在根组装中接入 IAM 后批量回填操作人昵称及解析昵称筛选。未接入时昵称为空，昵称筛选返回空列表。
+- `app.UserNicknameReader` 已在根组装中桥接 IAM，批量回填操作人昵称及解析昵称筛选；保持租户隔离。
 - `system/adapter/http.OperationRecorder` 实现 `httpx.OperateLogRecorder`；成功的字典和公告写操作在有界上下文内同步记录操作日志，不创建脱离服务生命周期的协程。
 - 适配器按 Unicode 字符截断超长 `User-Agent`，避免客户端通过请求头长度使整条操作日志被拒绝。
 - 登录流程通过 `AuditLogService.RecordLoginLog` 写入成功、账密错误、账号禁用及登出事件；不提供客户端可随意伪造审计日志的写接口。
@@ -75,7 +75,7 @@ Compose 使用独立项目 `owot-system-tests`，端口为本机 `13306`（MySQL
 
 字典类型标识创建后不可变，含数据项时禁止删除。字典类型与 `(dict_type, value)` 分别通过唯一索引保护；内部可空的 `active_type/active_value` 在软删除时清空，支持多次删除后复用同一业务标识。
 
-字典数据写入与类型删除都先锁定父类型。跨类型更新与批量删除在修改前收集所需父类型，统一按类型标识排序、去重后加锁，避免按 ID 与按类型排序混用产生的反向锁等待。删除使用当前读检查数据项，避免 MySQL REPEATABLE READ 快照遗漏刚提交的数据项。业务变更和 `system.dict.invalidate` 事件在同一事务落库，提交后立即尝试 Redis 广播并递增 `system.dict.invalidate:version:0`。失败事件保留在 Outbox，Relay 每 2 秒扫描，失败采用有上限的指数退避，投递语义为至少一次，消费者应按事件 ID 去重。
+字典数据写入与类型删除都先锁定父类型。跨类型更新与批量删除在修改前收集所需父类型，统一按类型标识排序、去重后加锁，避免按 ID 与按类型排序混用产生的反向锁等待。删除使用当前读检查数据项，避免 MySQL REPEATABLE READ 快照遗漏刚提交的数据项。业务变更和 `system.dict.invalidate` 事件在同一事务落库，提交后立即尝试 Redis 广播并递增 `system.dict.invalidate:version:0`。失败事件保留在 Outbox，Relay 每 500ms 扫描，失败采用封顶 1 秒的指数退避（满足 IAM 两秒恢复契约），投递语义为至少一次，消费者应按事件 ID 去重。
 
 当前字典读取直接查库，避免本地缓存残留。后续接入本地缓存时仍须遵循架构文档的版本检查与有界 TTL 规则。
 

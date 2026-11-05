@@ -142,6 +142,48 @@ func scopeTenant(db *gorm.DB) {
 			Column: clause.Column{Table: clause.CurrentTable, Name: "tenant_id"}, Value: id,
 		}}})
 	}
+	scopeData(db)
+}
+
+func scopeData(db *gorm.DB) {
+	if db.Statement.Schema == nil {
+		return
+	}
+	scope, ok := ctxmeta.Scope(db.Statement.Context)
+	if !ok || scope.All {
+		return
+	}
+	var deptColumn, userColumn string
+	switch db.Statement.Schema.Table {
+	case "system_users":
+		deptColumn, userColumn = "dept_id", "id"
+	case "system_dept":
+		deptColumn = "id"
+	default:
+		return
+	}
+	exprs := []clause.Expression{}
+	if len(scope.DeptIDs) > 0 {
+		values := make([]any, len(scope.DeptIDs))
+		for i, id := range scope.DeptIDs {
+			values[i] = id
+		}
+		exprs = append(exprs, clause.IN{Column: clause.Column{Table: clause.CurrentTable, Name: deptColumn}, Values: values})
+	}
+	if scope.Self && userColumn != "" {
+		exprs = append(exprs, clause.Eq{Column: clause.Column{Table: clause.CurrentTable, Name: userColumn}, Value: scope.UserID})
+	}
+	if len(exprs) == 0 {
+		db.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "1 = 0"}}})
+		return
+	}
+	// GORM treats an OrConditions with one child as an OR against the previous
+	// WHERE expression. A single scope predicate must instead be joined with AND.
+	if len(exprs) == 1 {
+		db.Statement.AddClause(clause.Where{Exprs: exprs})
+		return
+	}
+	db.Statement.AddClause(clause.Where{Exprs: []clause.Expression{clause.Or(exprs...)}})
 }
 
 func scopeTenantUpdate(db *gorm.DB) {

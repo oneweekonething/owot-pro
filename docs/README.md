@@ -51,6 +51,7 @@ owot-pro/
     │   └── INFRA.md                           # [领域] internal/infra 配置、文件、定时任务、API 日志与监控设计规范
     ├── development/
     │   ├── GO_CONVENTIONS.md                  # [研发] Go 编码规范、三层错误映射、Context 与并发安全准则
+    │   ├── IAM_IMPLEMENTATION.md                 # [运行] IAM 启动、认证、权限与验证说明
     │   └── API_CONVENTIONS.md                 # [契约] RESTful API 规范（100% 兼容 yudao-ui-admin-vue3 前端）
     ├── database/
     │   └── DATABASE.md                        # [数据] 27 张表清单、多租户隔离、5 级数据权限、Outbox 表与迁移规范

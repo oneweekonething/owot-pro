@@ -17,6 +17,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	iamcache "oneweekonething.com/owot-pro/internal/iam/adapter/cache"
+	iampersistence "oneweekonething.com/owot-pro/internal/iam/adapter/persistence"
 	"oneweekonething.com/owot-pro/internal/platform/dbx"
 	"oneweekonething.com/owot-pro/internal/platform/httpx"
 	"oneweekonething.com/owot-pro/internal/platform/outbox"
@@ -26,9 +28,10 @@ import (
 )
 
 type application struct {
-	handler http.Handler
-	relay   *outbox.Store
-	close   func() error
+	handler     http.Handler
+	relay       *outbox.Store
+	permissions *iamcache.Permissions
+	close       func() error
 }
 
 func newApplication(ctx context.Context, migrate, seed bool) (*application, error) {
@@ -38,7 +41,7 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 		if migrate || seed {
 			return nil, errors.New("-migrate/-seed require OWOT_MYSQL_DSN and OWOT_REDIS_ADDR")
 		}
-		log.Info("System is disabled; set OWOT_MYSQL_DSN and OWOT_REDIS_ADDR to enable it")
+		log.Info("IAM and System are disabled; set OWOT_MYSQL_DSN and OWOT_REDIS_ADDR to enable them")
 		return &application{handler: newHandler(), close: func() error { return nil }}, nil
 	}
 	if dsn == "" || redisAddr == "" {
@@ -81,28 +84,36 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 		return nil, err
 	}
 	if migrate {
-		if err := errors.Join(persistence.Migrate(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
+		if err := errors.Join(persistence.Migrate(db.WithContext(ctx)), iampersistence.Migrate(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
 			_ = closeDependencies()
-			return nil, fmt.Errorf("migrate System schema: %w", err)
+			return nil, fmt.Errorf("migrate backend schema: %w", err)
 		}
 	}
-	if err := persistence.CheckSchema(db.WithContext(ctx)); err != nil {
+	if err := errors.Join(persistence.CheckSchema(db.WithContext(ctx)), iampersistence.CheckSchema(db.WithContext(ctx))); err != nil {
 		_ = closeDependencies()
 		return nil, err
 	}
-	store := outbox.NewStore(db, outbox.NewRedisBroadcaster(client), log)
+	store := outbox.NewStore(db, iamcache.NewBroadcaster(client), log)
+	deps := httpx.Dependencies{Logger: log, AllowedOrigins: strings.Split(os.Getenv("OWOT_CORS_ORIGINS"), ",")}
+	handler, iam, permissions, err := newBackendHandler(db, store, client, deps, os.Getenv("OWOT_AVATAR_DIR"))
+	if err != nil {
+		_ = closeDependencies()
+		return nil, err
+	}
+	closeBackend := func() error { permissions.Close(); return closeDependencies() }
 	if seed {
 		repo := persistence.NewDictRepository(db)
 		dicts := app.NewDictService(repo, repo, dbx.NewTxManager(db), store)
 		if err := dicts.SeedDefaults(ctx); err != nil {
-			_ = closeDependencies()
+			_ = closeBackend()
 			return nil, fmt.Errorf("seed System dictionaries: %w", err)
 		}
+		if err := iam.SeedDefaults(ctx); err != nil {
+			_ = closeBackend()
+			return nil, fmt.Errorf("seed IAM defaults: %w", err)
+		}
 	}
-	// IAM will supply these three security ports. Nil ports reject protected routes.
-	deps := httpx.Dependencies{Logger: log, AllowedOrigins: strings.Split(os.Getenv("OWOT_CORS_ORIGINS"), ",")}
-	handler := newSystemHandler(db, store, deps, nil)
-	return &application{handler: handler, relay: store, close: closeDependencies}, nil
+	return &application{handler: handler, relay: store, permissions: permissions, close: closeBackend}, nil
 }
 
 func newSystemHandler(db *gorm.DB, store *outbox.Store, deps httpx.Dependencies, users app.UserNicknameReader) http.Handler {

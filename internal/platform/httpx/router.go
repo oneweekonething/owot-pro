@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -16,6 +17,9 @@ import (
 	"oneweekonething.com/owot-pro/internal/platform/ctxmeta"
 )
 
+// ErrUnauthenticated distinguishes an invalid credential from a dependency failure.
+var ErrUnauthenticated = errors.New("httpx: unauthenticated")
+
 type TokenVerifier interface {
 	Verify(context.Context, string) (ctxmeta.LoginUser, error)
 }
@@ -26,6 +30,10 @@ type PermissionChecker interface {
 
 type TenantValidator interface {
 	ValidateTenant(context.Context, int64) error
+}
+
+type DataPermissionProvider interface {
+	DataScope(context.Context, ctxmeta.LoginUser) (ctxmeta.DataScope, error)
 }
 
 type OperateLog struct {
@@ -40,20 +48,24 @@ type OperateLogRecorder interface {
 }
 
 type Dependencies struct {
-	Tokens         TokenVerifier
-	Permissions    PermissionChecker
-	Tenants        TenantValidator
-	Operations     OperateLogRecorder
-	Logger         *slog.Logger
-	AllowedOrigins []string
+	Tokens          TokenVerifier
+	Permissions     PermissionChecker
+	Tenants         TenantValidator
+	DataPermissions DataPermissionProvider
+	Operations      OperateLogRecorder
+	Logger          *slog.Logger
+	AllowedOrigins  []string
 }
 
 type Route struct {
-	PermitAll    bool
-	TenantIgnore bool
-	Permission   string
-	AuditType    string
-	AuditSubType string
+	PermitAll bool
+	// CredentialExchange leaves credential validation to the public auth use
+	// case. A stale bearer or visit override must not block login or logout.
+	CredentialExchange bool
+	TenantIgnore       bool
+	Permission         string
+	AuditType          string
+	AuditSubType       string
 }
 
 type Router struct {
@@ -127,6 +139,16 @@ func trace() gin.HandlerFunc {
 func (r *Router) guard(route Route) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx := c.Request.Context()
+		if route.CredentialExchange && route.PermitAll && route.Permission == "" {
+			id, err := strconv.ParseInt(c.GetHeader("tenant-id"), 10, 64)
+			if err != nil || id <= 0 {
+				Failure(c, 400, "缺少或无效的租户编号")
+				return
+			}
+			c.Request = c.Request.WithContext(ctxmeta.WithTenantID(ctx, id))
+			c.Next()
+			return
+		}
 		token := c.Query("token")
 		if authorization := c.GetHeader("Authorization"); authorization != "" {
 			parts := strings.Fields(authorization)
@@ -144,6 +166,10 @@ func (r *Router) guard(route Route) gin.HandlerFunc {
 			}
 			var err error
 			user, err = r.deps.Tokens.Verify(ctx, token)
+			if err != nil && !errors.Is(err, ErrUnauthenticated) {
+				InternalError(c, r.deps.Logger, err)
+				return
+			}
 			wantType := 1
 			if strings.HasPrefix(c.FullPath(), "/app-api/") {
 				wantType = 2
@@ -189,6 +215,14 @@ func (r *Router) guard(route Route) gin.HandlerFunc {
 				return
 			}
 			ctx = ctxmeta.WithTenantID(ctx, id)
+		}
+		if user.ID > 0 && !route.TenantIgnore && r.deps.DataPermissions != nil {
+			scope, err := r.deps.DataPermissions.DataScope(ctx, user)
+			if err != nil {
+				InternalError(c, r.deps.Logger, err)
+				return
+			}
+			ctx = ctxmeta.WithDataScope(ctx, scope)
 		}
 		c.Request = c.Request.WithContext(ctx)
 		if route.Permission != "" && !user.SuperAdmin {

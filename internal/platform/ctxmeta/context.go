@@ -10,6 +10,7 @@ const (
 	ignoreTenantKey
 	userKey
 	traceKey
+	dataScopeKey
 )
 
 type LoginUser struct {
@@ -17,6 +18,28 @@ type LoginUser struct {
 	TenantID   int64
 	UserType   int
 	SuperAdmin bool
+}
+
+// DataScope is resolved once by the request guard. Absence means an internal
+// identity lookup; a present empty scope deliberately grants no business rows.
+type DataScope struct {
+	All, Self bool
+	DeptIDs   []int64
+	UserID    int64
+}
+
+func WithDataScope(ctx context.Context, scope DataScope) context.Context {
+	return context.WithValue(ctx, dataScopeKey, &scope)
+}
+func WithoutDataScope(ctx context.Context) context.Context {
+	return context.WithValue(ctx, dataScopeKey, (*DataScope)(nil))
+}
+func Scope(ctx context.Context) (DataScope, bool) {
+	s, _ := ctx.Value(dataScopeKey).(*DataScope)
+	if s == nil {
+		return DataScope{}, false
+	}
+	return *s, true
 }
 
 func WithTenantID(ctx context.Context, id int64) context.Context {
@@ -63,6 +86,10 @@ func CloneContext(ctx context.Context) context.Context {
 	}
 	if IsIgnoreTenant(ctx) {
 		clone = WithIgnoreTenant(clone)
+	}
+	if scope, ok := Scope(ctx); ok {
+		scope.DeptIDs = append([]int64(nil), scope.DeptIDs...)
+		clone = WithDataScope(clone, scope)
 	}
 	return clone
 }

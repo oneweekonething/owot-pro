@@ -19,8 +19,8 @@ func main() {
 	var (
 		addr      = flag.String("addr", ":48080", "HTTP listen address")
 		checkOnly = flag.Bool("check", false, "validate startup wiring and exit")
-		migrate   = flag.Bool("migrate", false, "initialize System tables (development only)")
-		seed      = flag.Bool("seed", false, "initialize missing System dictionary defaults")
+		migrate   = flag.Bool("migrate", false, "initialize IAM and System tables (development only)")
+		seed      = flag.Bool("seed", false, "initialize missing IAM and System defaults")
 	)
 	flag.Parse()
 
@@ -61,6 +61,9 @@ func run(ctx context.Context, addr string, checkOnly, migrate, seed bool) error 
 	var workers sync.WaitGroup
 	if application.relay != nil {
 		workers.Go(func() { application.relay.Run(workerCtx) })
+	}
+	if application.permissions != nil {
+		workers.Go(func() { application.permissions.Run(workerCtx) })
 	}
 	defer func() {
 		cancelWorkers()

@@ -3,6 +3,7 @@
 /coverage/
 /coverage.out
 /coverage.html
+/data/iam-avatars/
 *.test
 *.prof
 
