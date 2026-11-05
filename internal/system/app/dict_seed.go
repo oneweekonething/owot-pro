@@ -26,6 +26,10 @@ func (s *DictService) SeedDefaults(ctx context.Context) error {
 		{"用户类型", "user_type", []seedItem{{"管理后台用户", "1"}, {"会员用户", "2"}}},
 		{"参数配置类型", "infra_config_type", []seedItem{{"系统内置", "1"}, {"自定义", "2"}}},
 		{"文件存储器", "infra_file_storage", []seedItem{{"数据库", "1"}, {"本地磁盘", "10"}, {"S3 对象存储", "20"}}},
+		{"定时任务状态", "infra_job_status", []seedItem{{"初始化中", "0"}, {"运行中", "1"}, {"暂停", "2"}}},
+		{"任务日志状态", "infra_job_log_status", []seedItem{{"运行中", "0"}, {"成功", "1"}, {"失败", "2"}}},
+		{"API 错误处理状态", "infra_api_error_log_process_status", []seedItem{{"未处理", "0"}, {"已处理", "1"}, {"已忽略", "2"}}},
+		{"API 操作类型", "infra_operate_type", []seedItem{{"其他", "0"}, {"查询", "1"}, {"新增", "2"}, {"修改", "3"}, {"删除", "4"}}},
 		{"是否可见", "infra_boolean_string", []seedItem{{"可见", "true"}, {"不可见", "false"}}},
 	}
 	for _, def := range defaults {

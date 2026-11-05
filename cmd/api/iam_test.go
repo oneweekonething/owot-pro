@@ -48,6 +48,7 @@ type iamFixture struct {
 	db              *gorm.DB
 	admin           string
 	legacyAvatarDir string
+	operations      infraOperations
 }
 type iamEnvelope struct {
 	Code int             `json:"code"`
@@ -58,7 +59,7 @@ type iamEnvelope struct {
 func newIAMFixture(t *testing.T) *iamFixture {
 	t.Helper()
 	db := testhelper.SQLite(t)
-	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, infrapersistence.Migrate, migrateFileStorage, outbox.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, infrapersistence.Migrate, migrateFileStorage, infrapersistence.MigrateOperations, outbox.Migrate} {
 		if err := migrate(db); err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +79,11 @@ func newIAMFixture(t *testing.T) *iamFixture {
 		t.Fatal(err)
 	}
 	legacyAvatarDir := t.TempDir()
-	handler, service, cache, err := newBackendHandler(db, store, client, configs, files, httpx.Dependencies{Logger: log}, legacyAvatarDir)
+	operations, err := newInfraOperations(db, client, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, service, cache, err := newBackendHandler(db, store, client, configs, files, operations, httpx.Dependencies{Logger: log}, legacyAvatarDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +98,7 @@ func newIAMFixture(t *testing.T) *iamFixture {
 	if err := service.SeedDefaults(context.Background()); err != nil {
 		t.Fatalf("idempotent seed: %v", err)
 	}
-	f := &iamFixture{t: t, handler: handler, service: service, redis: client, db: db, legacyAvatarDir: legacyAvatarDir}
+	f := &iamFixture{t: t, handler: handler, service: service, redis: client, db: db, legacyAvatarDir: legacyAvatarDir, operations: operations}
 	f.admin = f.login(1, "admin", "admin123").AccessToken
 	return f
 }

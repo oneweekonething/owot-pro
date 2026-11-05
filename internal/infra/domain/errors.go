@@ -18,3 +18,19 @@ var (
 	ErrFileTooLarge       = errors.New("infra: file too large")
 	ErrFileDirectUpload   = errors.New("infra: direct upload requires S3 storage")
 )
+
+var (
+	ErrJobNotFound       = errors.New("infra: job not found")
+	ErrJobLogNotFound    = errors.New("infra: job log not found")
+	ErrJobHandlerUsed    = errors.New("infra: job handler already scheduled")
+	ErrJobHandlerMissing = errors.New("infra: job handler is not registered")
+	ErrJobCron           = errors.New("infra: invalid or expired cron expression")
+	ErrJobChanged        = errors.New("infra: job changed concurrently")
+)
+
+var (
+	ErrLogExportLimit    = errors.New("infra: log export exceeds row limit")
+	ErrAccessLogNotFound = errors.New("infra: API access log not found")
+	ErrErrorLogNotFound  = errors.New("infra: API error log not found")
+	ErrErrorLogHandled   = errors.New("infra: API error log already handled")
+)

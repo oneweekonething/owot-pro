@@ -84,3 +84,85 @@ type DirectFileStorage interface {
 type FileStorageFactory interface {
 	Engine(context.Context, domain.FileConfig) (FileStorageEngine, error)
 }
+
+type JobFilter struct {
+	pagination.PageQuery
+	Name, HandlerName string
+	Status            *int
+}
+
+type JobLogFilter struct {
+	pagination.PageQuery
+	Export                             bool
+	JobID                              int64
+	HandlerName                        string
+	Status                             *int
+	BeginFrom, BeginTo, EndFrom, EndTo *time.Time
+}
+
+type JobRepository interface {
+	Get(context.Context, int64) (domain.Job, error)
+	Save(context.Context, *domain.Job) error
+	Delete(context.Context, int64) error
+	Page(context.Context, JobFilter) (pagination.PageResult[domain.Job], error)
+}
+
+type JobLogReader interface {
+	GetLog(context.Context, int64) (domain.JobLog, error)
+	PageLogs(context.Context, JobLogFilter) (pagination.PageResult[domain.JobLog], error)
+}
+
+type JobQueue interface {
+	Due(context.Context, time.Time, int) ([]domain.Job, error)
+	Claim(context.Context, domain.Job, *time.Time, *domain.JobLog) (bool, error)
+}
+
+type JobLogRecorder interface {
+	StartLog(context.Context, *domain.JobLog) error
+	FinishLog(context.Context, domain.JobLog) error
+}
+
+type JobSchedule interface {
+	Next(string, time.Time) (time.Time, error)
+}
+
+type JobLocker interface {
+	Acquire(context.Context, string, time.Duration) (func(context.Context) error, error)
+}
+
+type RequestLogFilter struct {
+	pagination.PageQuery
+	Export                      bool
+	UserID                      *int64
+	UserType                    *int
+	ApplicationName, RequestURL string
+	From, To                    *time.Time
+}
+
+type AccessLogFilter struct {
+	RequestLogFilter
+	Duration   *int64
+	ResultCode *int
+}
+
+type ErrorLogFilter struct {
+	RequestLogFilter
+	ProcessStatus *int
+}
+
+type AccessLogRepository interface {
+	CreateAccess(context.Context, domain.APIAccessLog) error
+	GetAccess(context.Context, int64) (domain.APIAccessLog, error)
+	PageAccess(context.Context, AccessLogFilter) (pagination.PageResult[domain.APIAccessLog], error)
+}
+
+type ErrorLogRepository interface {
+	CreateError(context.Context, domain.APIErrorLog) error
+	GetError(context.Context, int64) (domain.APIErrorLog, error)
+	PageError(context.Context, ErrorLogFilter) (pagination.PageResult[domain.APIErrorLog], error)
+	ProcessError(context.Context, int64, int, int64, time.Time) error
+}
+
+type RedisInspector interface {
+	Snapshot(context.Context) (info, commandStats string, dbSize int64, err error)
+}

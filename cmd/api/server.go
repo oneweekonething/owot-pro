@@ -32,6 +32,7 @@ type application struct {
 	handler     http.Handler
 	relay       *outbox.Store
 	permissions *iamcache.Permissions
+	operations  infraOperations
 	close       func() error
 }
 
@@ -86,13 +87,13 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 	}
 	if migrate {
 		if err := errors.Join(persistence.Migrate(db.WithContext(ctx)), iampersistence.Migrate(db.WithContext(ctx)),
-			infrapersistence.Migrate(db.WithContext(ctx)), migrateFileStorage(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
+			infrapersistence.Migrate(db.WithContext(ctx)), migrateFileStorage(db.WithContext(ctx)), infrapersistence.MigrateOperations(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
 			_ = closeDependencies()
 			return nil, fmt.Errorf("migrate backend schema: %w", err)
 		}
 	}
 	if err := errors.Join(persistence.CheckSchema(db.WithContext(ctx)), iampersistence.CheckSchema(db.WithContext(ctx)),
-		infrapersistence.CheckSchema(db.WithContext(ctx)), infrapersistence.CheckFileSchema(db.WithContext(ctx))); err != nil {
+		infrapersistence.CheckSchema(db.WithContext(ctx)), infrapersistence.CheckFileSchema(db.WithContext(ctx)), infrapersistence.CheckOperationsSchema(db.WithContext(ctx))); err != nil {
 		_ = closeDependencies()
 		return nil, err
 	}
@@ -109,7 +110,13 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 		return nil, fmt.Errorf("create file service: %w", err)
 	}
 	deps := httpx.Dependencies{Logger: log, AllowedOrigins: strings.Split(os.Getenv("OWOT_CORS_ORIGINS"), ",")}
-	handler, iam, permissions, err := newBackendHandler(db, store, client, configs, files, deps, os.Getenv("OWOT_AVATAR_DIR"))
+	operations, err := newInfraOperations(db, client, log)
+	if err != nil {
+		configCache.Close()
+		_ = closeDependencies()
+		return nil, fmt.Errorf("create Infra operations: %w", err)
+	}
+	handler, iam, permissions, err := newBackendHandler(db, store, client, configs, files, operations, deps, os.Getenv("OWOT_AVATAR_DIR"))
 	if err != nil {
 		configCache.Close()
 		_ = closeDependencies()
@@ -131,8 +138,12 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 			_ = closeBackend()
 			return nil, fmt.Errorf("seed IAM defaults: %w", err)
 		}
+		if err := operations.seed(ctx); err != nil {
+			_ = closeBackend()
+			return nil, fmt.Errorf("seed Infra jobs: %w", err)
+		}
 	}
-	return &application{handler: handler, relay: store, permissions: permissions, close: closeBackend}, nil
+	return &application{handler: handler, relay: store, permissions: permissions, operations: operations, close: closeBackend}, nil
 }
 
 func newSystemHandler(db *gorm.DB, store *outbox.Store, deps httpx.Dependencies, users app.UserNicknameReader) http.Handler {

@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gin-gonic/gin"
 
@@ -42,6 +43,35 @@ func (h *FileHandler) fail(c *gin.Context, err error) {
 		httpx.Failure(c, 409, "文件配置正在使用中")
 	case errors.Is(err, domain.ErrFileDirectUpload):
 		httpx.Failure(c, 400, "当前主文件配置不支持前端直传")
+	default:
+		httpx.InternalError(c, h.logger, err)
+	}
+}
+
+func (h *OperationsHandler) fail(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, domain.ErrInvalidArgument):
+		httpx.Failure(c, 400, "请求参数不正确")
+	case errors.Is(err, domain.ErrJobNotFound):
+		httpx.Failure(c, 1_001_001_000, "定时任务不存在")
+	case errors.Is(err, domain.ErrJobHandlerUsed):
+		httpx.Failure(c, 1_001_001_001, "任务处理器已被使用")
+	case errors.Is(err, domain.ErrJobCron):
+		httpx.Failure(c, 1_001_001_005, "Cron 表达式无效或没有后续执行时间")
+	case errors.Is(err, domain.ErrJobHandlerMissing):
+		httpx.Failure(c, 1_001_001_006, "任务处理器未注册")
+	case errors.Is(err, domain.ErrJobChanged):
+		httpx.Failure(c, 409, "任务已发生变更，请刷新后重试")
+	case errors.Is(err, domain.ErrJobLogNotFound):
+		httpx.Failure(c, 1_001_001_008, "任务日志不存在")
+	case errors.Is(err, domain.ErrLogExportLimit):
+		httpx.Failure(c, 400, fmt.Sprintf("单次最多导出 %d 条日志，请缩小查询范围", domain.MaxLogExportRows))
+	case errors.Is(err, domain.ErrAccessLogNotFound):
+		httpx.Failure(c, 1_001_005_000, "访问日志不存在")
+	case errors.Is(err, domain.ErrErrorLogNotFound):
+		httpx.Failure(c, 1_001_004_000, "错误日志不存在")
+	case errors.Is(err, domain.ErrErrorLogHandled):
+		httpx.Failure(c, 1_001_004_001, "错误日志已处理")
 	default:
 		httpx.InternalError(c, h.logger, err)
 	}

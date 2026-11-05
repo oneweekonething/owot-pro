@@ -23,6 +23,7 @@ internal/infra/
 │   ├── config_service.go              # 参数配置 CRUD + 内存缓存 + Outbox 事件写入
 │   ├── file_service.go                # 文件配置 CRUD、切换 Master（同事务写 Outbox）、文件上传/删除/读取、预签名 URL 生成
 │   ├── job_service.go                 # 定时任务 CRUD、暂停/恢复、立即触发、JobLog 纯业务记录与查询
+│   ├── job_runner.go                  # 持久化认领、Redis 租约、重试与执行记录
 │   ├── api_log_service.go             # RecordAccessLog / RecordErrorLog 纯业务方法、分页查询、标记已处理、过期日志清理
 │   └── redis_monitor_service.go       # 解析 Redis INFO、CommandStats 与 DBSize
 └── adapter/
@@ -72,7 +73,7 @@ internal/infra/
 2. **文件主配置热切换（`FileService.UpdateFileConfigMaster`）**：
    - 在单事务内执行 `UPDATE infra_file_config SET master = false` + `UPDATE infra_file_config SET master = true WHERE id = ?` + 写入 `sys_outbox_event`，由实时广播与 Outbox Relay 确保所有节点刷新 `storage.Factory` 缓存。
 3. **内置日志清理定时任务（`accessLogCleanJob` / `errorLogCleanJob` / `jobLogCleanJob`）**：
-   - 启动时默认注册到 `jobx.Scheduler`，定期清理超过保留天数的历史日志，防止单表膨胀。
+   - 启动时注册 Go 处理器，`-seed` 创建默认调度，定期清理超过 14 天的历史日志。
 
 ---
 
@@ -86,10 +87,10 @@ internal/infra/
 | **文件配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/file-config/{create,update,update-master,delete,delete-list,get,page,test}` | `infra:file-config:*` | 文件配置 CRUD、设为主配置、测试上传连通性 |
 | **文件服务** | `POST / GET / DELETE` | `/admin-api/infra/file/{upload,presigned-url,create,delete,delete-list,page}` | 已登录 / `infra:file:*` | 后端上传文件、获取 S3 预签名 URL、前端直传完成登记、删除文件、文件分页 |
 | **文件读取** | `GET / HEAD` | `/admin-api/infra/file/:configId/get/*path` | `PermitAll` + `TenantIgnore` | 按配置编号读取已登记文件 |
-| **定时任务** | `POST/PUT/DELETE/GET` | `/admin-api/infra/job/{create,update,update-status,trigger,delete,get,page,export-excel}` | `infra:job:*` | 定时任务 CRUD、暂停/恢复、立即执行一次、分页与导出 |
-| **任务日志** | `GET` | `/admin-api/infra/job-log/{get,page,export-excel}` | `infra:job:query` | 定时任务执行日志详情、分页与导出 |
-| **访问日志** | `GET` | `/admin-api/infra/api-access-log/{page,export-excel}` | `infra:api-access-log:*` | API 访问日志分页与导出 |
-| **错误日志** | `PUT / GET` | `/admin-api/infra/api-error-log/{update-status,page,export-excel}` | `infra:api-error-log:*` | API 错误日志分页、导出与标记已处理/已忽略 |
+| **定时任务** | `POST/PUT/DELETE/GET` | `/admin-api/infra/job/{create,update,update-status,trigger,delete,delete-list,get,page,export-excel,get_next_times,sync}` | `infra:job:*` | 定时任务 CRUD、暂停/恢复、立即执行一次、分页、导出、预览执行时间与校验调度 |
+| **任务日志** | `GET` | `/admin-api/infra/job-log/{get,page,export-excel}` | `infra:job:query` / `infra:job:export` | 定时任务执行日志详情、分页与导出 |
+| **访问日志** | `GET` | `/admin-api/infra/api-access-log/{get,page,export-excel}` | `infra:api-access-log:*` | API 访问日志分页与导出 |
+| **错误日志** | `PUT / GET` | `/admin-api/infra/api-error-log/{update-status,get,page,export-excel}` | `infra:api-error-log:*` | API 错误日志分页、导出与标记已处理/已忽略 |
 | **Redis 监控** | `GET` | `/admin-api/infra/redis/get-monitor-info` | `infra:redis:get-monitor-info` | 返回 `{info, dbSize, commandStats}` |
 
 参数配置表由 `migrations/mysql/003_infra_config.sql` 创建。升级已有部署时在启动前执行该迁移，并运行 `go run ./cmd/api -seed -check` 补齐配置类型和可见性字典。本地开发可用 `go run ./cmd/api -migrate -seed -check` 初始化。
@@ -104,3 +105,13 @@ internal/infra/
 - 后端上传和直传登记均限制为 20 MiB。S3 直传需要浏览器能访问 `endpoint`，并在 bucket 配置允许前端源站发起 PUT 的 CORS 规则。预签名 PUT 有效期为 10 分钟，写入 `_upload/` 前缀。按上传者和实际内容登记后，服务写入最终对象。预览请求可等待登记，最长 15 秒。20 MiB 限额在登记时校验，浏览器发起的 PUT 由 bucket 接收。为 `_upload/` 配置生命周期过期规则，以清理未登记及重复 PUT 的临时对象。
 - 同源部署可由前端代理 `/admin-api/infra/file/`。前后端分离时，将 `OWOT_FILE_PUBLIC_URL` 设为浏览器能访问的后端地址，DB 和本地配置的 `domain` 可覆盖此值。私有 S3 文件通过 24 小时签名链接读取，重新打开文件列表可获取新链接。S3 公开配置填写 `domain` 时可返回对象直链，bucket 的公开读取策略仅覆盖最终对象，排除 `_upload/`。头像使用稳定的 API 地址。
 - S3 配置详情以占位符显示密钥，编辑保留占位符或留空时沿用现有密钥。测试接口返回一条可下载的样例文件，样例可从文件列表删除。存储删除失败时，文件仍在管理列表中供重试，API 下载在此期间停用。
+
+### 定时任务、API 日志与 Redis 监控部署
+
+升级时执行 [005_infra_operations.sql](../../migrations/mysql/005_infra_operations.sql)，再运行 `go run ./cmd/api -seed -check` 补齐运维字典、权限按钮和三条默认日志清理任务。开发环境也可运行 `go run ./cmd/api -migrate -seed -check`。全局定时任务和 Redis 监控由系统租户授权访问，API 日志按请求访问的有效租户隔离。
+
+- Cron 使用 Asia/Shanghai 时区和 Quartz 语法。每个 Go 处理器只能绑定一条有效任务，新增处理器需在启动装配中注册。默认日志清理任务于每日凌晨 02:00、02:10、02:20 执行。
+- 所有实例约每秒读取待执行任务，使用 Redis 租约防止同一处理器并发运行。MySQL 在同一事务内认领任务并写入首条运行日志。停机期间错过的多次调度合并执行一次。暂停阻止后续自动调度，仍可手动触发。重复请求在待执行期间合并。已经认领的执行继续运行，任务处理器须响应上下文取消。硬退出可能留下运行中的日志，已认领的次数由日志和任务状态供排查。
+- 重试间隔和执行超时均以毫秒为单位。超时为 0 时使用五分钟。每次尝试单独记录结果。同步接口校验已持久化的任务和处理器，各节点直接读取数据库中的调度状态。
+- API 日志在请求结束后异步写入。已确认租户的请求可记录访问日志，内部错误和 panic 额外记录脱敏堆栈。请求参数保留字段名，响应仅保留结果码，避免写入凭证、上传内容和业务响应。公开无租户接口和未验证租户的鉴权请求跳过 API 日志，账号登录仍由登录审计记录。日志队列满时丢弃新记录并写入告警。任务日志和 API 日志单次最多导出 5000 条，可按时间缩小查询范围。
+- Redis 监控使用应用连接读取 `INFO`、`INFO commandstats` 与 `DBSIZE`。连接账户需要这三项命令的读取权限。

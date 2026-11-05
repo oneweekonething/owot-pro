@@ -154,18 +154,63 @@ func (s *Service) SeedDefaults(ctx context.Context) error {
 					return err
 				}
 			}
-			allMenus, err := s.Menus.List(ctx, all())
+			menus, err = s.Menus.List(ctx, all())
 			if err != nil {
 				return err
 			}
 			ids := []int64{}
-			for _, menu := range allMenus.List {
+			for _, menu := range menus.List {
 				ids = append(ids, menu.ID)
 			}
 			if err := s.Links.AssignRoleMenus(ctx, role.ID, ids); err != nil {
 				return err
 			}
 		}
+		if err := s.seedInfraOperationMenus(ctx, menus.List); err != nil {
+			return err
+		}
 		return s.invalidate(ctxmeta.WithTenantID(ctx, 0), "seed")
 	})
+}
+
+func (s *Service) seedInfraOperationMenus(ctx context.Context, menus []domain.Menu) error {
+	var rootID int64
+	permissions := make(map[string]bool)
+	for _, menu := range menus {
+		if menu.ParentID == 0 && menu.Type == 1 && menu.Path == "/infra" {
+			rootID = menu.ID
+		}
+		permissions[menu.Permission] = true
+	}
+	if rootID == 0 {
+		return nil
+	}
+	pages := make(map[string]int64)
+	for _, menu := range menus {
+		if menu.ParentID != rootID || menu.Type != 2 {
+			continue
+		}
+		pages[menu.Path] = menu.ID
+		if menu.Path == "job-log" && menu.Component == "infra/job/logger/index" && menu.ComponentName == "InfraJobLog" {
+			// The upstream UI already registers /job/job-log with this route name.
+			menu.ComponentName = "InfraJobLogMenu"
+			if err := s.Menus.Save(ctx, &menu); err != nil {
+				return err
+			}
+		}
+	}
+	for _, item := range []struct{ page, action, name string }{
+		{"job", "trigger", "执行任务"},
+		{"api-error-log", "update-status", "处理错误"},
+		{"redis", "get-monitor-info", "查看 Redis 监控"},
+	} {
+		permission := "infra:" + item.page + ":" + item.action
+		if parent := pages[item.page]; parent != 0 && !permissions[permission] {
+			button := domain.Menu{Name: item.name, ParentID: parent, Type: 3, Permission: permission}
+			if err := s.Menus.Save(ctx, &button); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

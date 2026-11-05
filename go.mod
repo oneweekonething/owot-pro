@@ -3,6 +3,7 @@ module oneweekonething.com/owot-pro
 go 1.25.0
 
 require (
+	github.com/JiaBao-do/quartzx v0.1.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/dgraph-io/ristretto/v2 v2.3.0
 	github.com/gin-gonic/gin v1.12.0

@@ -368,7 +368,7 @@ func TestSeedDefaultsIsIdempotentAndPreservesEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	types, err := f.dict.PageTypes(ctx, app.DictTypeFilter{PageQuery: pagination.PageQuery{PageSize: -1}})
-	if err != nil || types.Total != 12 {
+	if err != nil || types.Total != 16 {
 		t.Fatalf("default types: %+v, %v", types, err)
 	}
 	items, err := f.dict.PageData(ctx, app.DictDataFilter{DictType: "common_status", PageQuery: pagination.PageQuery{PageSize: -1}})
@@ -387,7 +387,7 @@ func TestSeedDefaultsIsIdempotentAndPreservesEdits(t *testing.T) {
 		t.Fatalf("seed overwrote existing value: %q, %v", label, err)
 	}
 	types, err = f.dict.PageTypes(ctx, app.DictTypeFilter{})
-	if err != nil || types.Total != 12 {
+	if err != nil || types.Total != 16 {
 		t.Fatalf("seed duplicated types: %+v, %v", types, err)
 	}
 }

@@ -28,7 +28,7 @@
 | `internal/platform/mqx` | 轻量消息总线 `Bus`：支持 `Publish`（Redis Stream 集群消费组）与 `Broadcast`（Redis Pub/Sub 多实例广播），提供 Memory 与 Redis 两种实现 | 无 |
 | `internal/platform/outbox` | 事务性 Outbox 表（`sys_outbox_event`）同事务写入器 + 后台 Relay 轮询投递与失败指数退避重试器 | 无 |
 | `internal/platform/lockx` | Redis Lua 分布式锁 `Locker`（`SET NX PX` + Token 校验释放） | 无 |
-| `internal/platform/jobx` | 基于 `robfig/cron/v3` + `lockx.Locker` 的集群定时任务调度器（支持在线增删改、暂停恢复、立即触发、失败重试） | `JobLogRecorder` |
+| `internal/platform/jobx` | 基于 `quartzx` 的 Quartz 表达式解析与执行时间计算，供 Infra 调度执行器使用 | 无 |
 | `internal/platform/excelx` | 基于 `excelize/v2` 的结构体标签（`excel:"name:状态;dict:common_status"`）流式导入导出工具 | `DictTranslator` |
 | `internal/platform/testhelper` | 测试辅助容器：支持 SQLite + miniredis 单元测试替身，以及基于环境变量/Docker 的真实 MySQL + Redis 集成测试环境初始化 | 无 |
 
@@ -47,7 +47,7 @@
       ↓
 [4. Metrics]        按路由模板记录 Prometheus 请求计数与耗时直方图
       ↓
-[5. AccessLog]      缓存请求体，请求结束后异步调用 AccessLogWriter 记录 infra_api_access_log
+[5. AccessLog]      有界采集请求参数结构，请求结束后异步调用 AccessLogWriter 记录已验证租户的访问日志
       ↓
 [6. TenantContext]  解析请求头 tenant-id / visit-tenant-id，通过 ctxmeta.WithTenantID 写入 Context
       ↓

@@ -53,6 +53,7 @@ type Dependencies struct {
 	Tenants         TenantValidator
 	DataPermissions DataPermissionProvider
 	Operations      OperateLogRecorder
+	RequestLogs     *RequestLogs
 	Logger          *slog.Logger
 	AllowedOrigins  []string
 }
@@ -81,6 +82,11 @@ func NewRouter(deps Dependencies) *Router {
 	_ = engine.SetTrustedProxies(nil)
 	router := &Router{Engine: engine, deps: deps}
 	engine.Use(router.recovery(), trace(), cors(deps.AllowedOrigins))
+	if deps.RequestLogs != nil {
+		// Recover handler panics before the recorder collects the response.
+		// The outer recovery also protects the recorder itself.
+		engine.Use(deps.RequestLogs.middleware, router.recovery())
+	}
 	engine.NoRoute(func(c *gin.Context) { Failure(c, 404, "接口不存在") })
 	engine.NoMethod(func(c *gin.Context) { Failure(c, 405, "请求方法不支持") })
 	engine.HandleMethodNotAllowed = true
@@ -92,16 +98,19 @@ func (r *Router) Handle(method, path string, route Route, handler gin.HandlerFun
 }
 
 func Success(c *gin.Context, value any) {
+	c.Set(resultCodeKey, 0)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "data": value, "msg": ""})
 }
 
 func SetAuditBizID(c *gin.Context, id int64) { c.Set("owot:audit_biz_id", id) }
 
 func Failure(c *gin.Context, code int, message string) {
+	c.Set(resultCodeKey, code)
 	c.AbortWithStatusJSON(http.StatusOK, gin.H{"code": code, "data": nil, "msg": message})
 }
 
 func InternalError(c *gin.Context, logger *slog.Logger, err error) {
+	captureRequestError(c, err)
 	logger.ErrorContext(c.Request.Context(), "request failed", "trace_id", ctxmeta.TraceID(c.Request.Context()), "error", err)
 	Failure(c, 500, "系统异常")
 }
@@ -110,6 +119,7 @@ func (r *Router) recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if value := recover(); value != nil {
+				captureRequestError(c, value)
 				r.deps.Logger.Error("HTTP handler panic", "trace_id", ctxmeta.TraceID(c.Request.Context()), "panic", value)
 				Failure(c, 500, "系统异常")
 			}
@@ -215,7 +225,9 @@ func (r *Router) guard(route Route) gin.HandlerFunc {
 				return
 			}
 			ctx = ctxmeta.WithTenantID(ctx, id)
+			c.Set(requestRouteKey, route)
 		}
+		c.Request = c.Request.WithContext(ctx)
 		if user.ID > 0 && !route.TenantIgnore && r.deps.DataPermissions != nil {
 			scope, err := r.deps.DataPermissions.DataScope(ctx, user)
 			if err != nil {

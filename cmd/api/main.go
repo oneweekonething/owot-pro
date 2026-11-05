@@ -20,7 +20,7 @@ func main() {
 		addr      = flag.String("addr", ":48080", "HTTP listen address")
 		checkOnly = flag.Bool("check", false, "validate startup wiring and exit")
 		migrate   = flag.Bool("migrate", false, "initialize backend tables (development only)")
-		seed      = flag.Bool("seed", false, "initialize missing IAM and System defaults")
+		seed      = flag.Bool("seed", false, "initialize missing IAM, System and Infra defaults")
 	)
 	flag.Parse()
 
@@ -58,6 +58,7 @@ func run(ctx context.Context, addr string, checkOnly, migrate, seed bool) error 
 		return nil
 	}
 	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	logCtx, cancelLogs := context.WithCancel(context.WithoutCancel(ctx))
 	var workers sync.WaitGroup
 	if application.relay != nil {
 		workers.Go(func() { application.relay.Run(workerCtx) })
@@ -65,8 +66,13 @@ func run(ctx context.Context, addr string, checkOnly, migrate, seed bool) error 
 	if application.permissions != nil {
 		workers.Go(func() { application.permissions.Run(workerCtx) })
 	}
+	if application.operations.runner != nil {
+		workers.Go(func() { application.operations.runner.Run(workerCtx) })
+		workers.Go(func() { application.operations.requestLogs.Run(logCtx) })
+	}
 	defer func() {
 		cancelWorkers()
+		cancelLogs()
 		workers.Wait()
 	}()
 
