@@ -4,6 +4,7 @@
 /coverage.out
 /coverage.html
 /data/iam-avatars/
+/data/infra-files/
 *.test
 *.prof
 

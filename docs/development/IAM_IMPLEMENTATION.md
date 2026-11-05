@@ -34,7 +34,7 @@ curl -X POST http://localhost:48080/admin-api/system/auth/login \
 - 权限、用户角色、部门和套餐变更同事务写 Outbox。提交后立即尝试广播，Redis `iam:perm_ver:<tenantId>` 与全局版本 `iam:perm_ver:0` 参与每次缓存校验；Ristretto 本地缓存 TTL 上限 30 秒，Pub/Sub 加速失效。Relay 每 500ms 扫描，重试退避封顶 1 秒，广播恢复后在两秒内重放。Redis 不可用时拒绝使用旧缓存授权。
 - 禁用用户、重置密码、登出和强退先在事务中销毁数据库双令牌，提交成功后在响应前同步清理 Redis；回滚保留原会话。Redis 清理暂时失败时，数据库校验仍立即拒绝已撤销的会话。登出可通过所属租户的过期 AccessToken 撤销配对 RefreshToken。在线令牌列表的 `accessToken` 字段返回不可认证的 `session:<id>` 标识，前端可沿用该字段强退。登录、登出、强退及管理操作接入 System 审计；操作人昵称通过 Composition Root 中的桥接查询。
 - 用户 Excel 使用“用户账号、用户昵称、部门编号、用户邮箱、手机号码、用户性别、帐号状态、初始密码”列；可先下载 `user/get-import-template`。性别和状态通过 System 字典互译。导入最多 1000 行，按行报告创建、更新和失败；`updateSupport=true` 允许更新现有账号。新账号未填写初始密码时使用 `admin123`，更新不会覆盖已有密码。导出不包含密码。
-- 头像支持 PNG/JPEG/GIF、最大 2MiB，使用随机文件名写入 `OWOT_AVATAR_DIR`（默认 `data/iam-avatars`），经 `/admin-api/system/user/profile/avatar/:name` 读取。通过 `AvatarUploader` 端口注入，后续 Infra 存储可替换本地实现；多实例部署应提供共享持久卷。
+- 头像支持 PNG/JPEG/GIF、最大 2 MiB。新头像通过 `AvatarUploader` 端口写入 Infra 当前主存储。既有头像继续经 `/admin-api/system/user/profile/avatar/:name` 从 `OWOT_AVATAR_DIR`（默认 `data/iam-avatars`）读取，升级时保留原持久卷。
 
 滑块验证码、短信/社交登录和 OAuth2 授权码 SSO 属于后续范围。Infra 菜单已初始化，对应业务实现仍由 Infra 阶段提供。
 

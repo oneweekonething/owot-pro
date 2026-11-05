@@ -13,6 +13,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -39,12 +41,13 @@ import (
 )
 
 type iamFixture struct {
-	t       *testing.T
-	handler http.Handler
-	service *iamapp.Service
-	redis   *redis.Client
-	db      *gorm.DB
-	admin   string
+	t               *testing.T
+	handler         http.Handler
+	service         *iamapp.Service
+	redis           *redis.Client
+	db              *gorm.DB
+	admin           string
+	legacyAvatarDir string
 }
 type iamEnvelope struct {
 	Code int             `json:"code"`
@@ -55,7 +58,7 @@ type iamEnvelope struct {
 func newIAMFixture(t *testing.T) *iamFixture {
 	t.Helper()
 	db := testhelper.SQLite(t)
-	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, infrapersistence.Migrate, outbox.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, infrapersistence.Migrate, migrateFileStorage, outbox.Migrate} {
 		if err := migrate(db); err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +73,12 @@ func newIAMFixture(t *testing.T) *iamFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(configCache.Close)
-	handler, service, cache, err := newBackendHandler(db, store, client, configs, httpx.Dependencies{Logger: log}, t.TempDir())
+	files, err := newFileService(db, store, client, t.TempDir(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyAvatarDir := t.TempDir()
+	handler, service, cache, err := newBackendHandler(db, store, client, configs, files, httpx.Dependencies{Logger: log}, legacyAvatarDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +93,7 @@ func newIAMFixture(t *testing.T) *iamFixture {
 	if err := service.SeedDefaults(context.Background()); err != nil {
 		t.Fatalf("idempotent seed: %v", err)
 	}
-	f := &iamFixture{t: t, handler: handler, service: service, redis: client, db: db}
+	f := &iamFixture{t: t, handler: handler, service: service, redis: client, db: db, legacyAvatarDir: legacyAvatarDir}
 	f.admin = f.login(1, "admin", "admin123").AccessToken
 	return f
 }
@@ -454,6 +462,15 @@ func TestIAMExcelAvatarClientsAndAudit(t *testing.T) {
 	f.handler.ServeHTTP(imageResponse, imageRequest)
 	if imageResponse.Code != 200 || !bytes.Equal(imageResponse.Body.Bytes(), imageBytes.Bytes()) {
 		t.Fatal("avatar inaccessible", imageResponse.Body.String())
+	}
+	const legacyName = "0123456789abcdef0123456789abcdef.png"
+	if err := os.WriteFile(filepath.Join(f.legacyAvatarDir, legacyName), imageBytes.Bytes(), 0640); err != nil {
+		t.Fatal(err)
+	}
+	legacy := httptest.NewRecorder()
+	f.handler.ServeHTTP(legacy, httptest.NewRequest("GET", prefixIAM+"user/profile/avatar/"+legacyName, nil))
+	if legacy.Code != 200 || !bytes.Equal(legacy.Body.Bytes(), imageBytes.Bytes()) {
+		t.Fatalf("legacy avatar inaccessible: %d %s", legacy.Code, legacy.Body)
 	}
 	result = f.upload("user/profile/update-avatar", "file", "bad.svg", []byte(`<svg/>`))
 	if result.Code != 400 {

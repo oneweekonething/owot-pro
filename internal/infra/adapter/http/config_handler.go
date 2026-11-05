@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -119,25 +119,10 @@ func (h *ConfigHandler) save(create bool) gin.HandlerFunc {
 
 func (h *ConfigHandler) remove(batch bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var ids []int64
-		if batch {
-			for _, value := range c.QueryArray("ids") {
-				for _, raw := range strings.Split(value, ",") {
-					id, err := configID(strings.TrimSpace(raw))
-					if err != nil {
-						h.fail(c, err)
-						return
-					}
-					ids = append(ids, id)
-				}
-			}
-		} else {
-			id, err := configID(c.Query("id"))
-			if err != nil {
-				h.fail(c, err)
-				return
-			}
-			ids = []int64{id}
+		ids, err := requestIDs(c, batch)
+		if err != nil {
+			h.fail(c, err)
+			return
 		}
 		if err := h.service.Delete(c.Request.Context(), ids); err != nil {
 			h.fail(c, err)
@@ -227,6 +212,12 @@ func configFilter(c *gin.Context) (app.ConfigFilter, error) {
 		}
 		filter.Type = &value
 	}
+	var err error
+	filter.From, filter.To, err = createTimeRange(c)
+	return filter, err
+}
+
+func createTimeRange(c *gin.Context) (from, to *time.Time, err error) {
 	repeated := c.QueryArray("createTime")
 	if len(repeated) == 0 {
 		repeated = c.QueryArray("createTime[]")
@@ -241,15 +232,15 @@ func configFilter(c *gin.Context) (app.ConfigFilter, error) {
 		}
 		value, err := timeutil.Parse(raw)
 		if err != nil {
-			return filter, domain.ErrInvalidArgument
+			return nil, nil, domain.ErrInvalidArgument
 		}
 		if i == 0 {
-			filter.From = &value
+			from = &value
 		} else {
-			filter.To = &value
+			to = &value
 		}
 	}
-	return filter, nil
+	return from, to, nil
 }
 
 func (h *ConfigHandler) export(c *gin.Context, configs []domain.Config) {

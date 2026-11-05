@@ -23,7 +23,7 @@ func NewConfigBroadcaster(client redis.UniversalClient, next outbox.Broadcaster)
 }
 
 func (b *ConfigBroadcaster) Broadcast(ctx context.Context, event outbox.Event) error {
-	if event.Topic != app.ConfigRefreshTopic {
+	if event.Topic != app.ConfigRefreshTopic && event.Topic != app.FileConfigRefreshTopic {
 		return b.next.Broadcast(ctx, event)
 	}
 	data, err := json.Marshal(event)

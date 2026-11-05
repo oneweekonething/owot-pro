@@ -86,13 +86,13 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 	}
 	if migrate {
 		if err := errors.Join(persistence.Migrate(db.WithContext(ctx)), iampersistence.Migrate(db.WithContext(ctx)),
-			infrapersistence.Migrate(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
+			infrapersistence.Migrate(db.WithContext(ctx)), migrateFileStorage(db.WithContext(ctx)), outbox.Migrate(db.WithContext(ctx))); err != nil {
 			_ = closeDependencies()
 			return nil, fmt.Errorf("migrate backend schema: %w", err)
 		}
 	}
 	if err := errors.Join(persistence.CheckSchema(db.WithContext(ctx)), iampersistence.CheckSchema(db.WithContext(ctx)),
-		infrapersistence.CheckSchema(db.WithContext(ctx))); err != nil {
+		infrapersistence.CheckSchema(db.WithContext(ctx)), infrapersistence.CheckFileSchema(db.WithContext(ctx))); err != nil {
 		_ = closeDependencies()
 		return nil, err
 	}
@@ -102,8 +102,14 @@ func newApplication(ctx context.Context, migrate, seed bool) (*application, erro
 		_ = closeDependencies()
 		return nil, fmt.Errorf("create config service: %w", err)
 	}
+	files, err := newFileService(db, store, client, os.Getenv("OWOT_FILE_DIR"), os.Getenv("OWOT_FILE_PUBLIC_URL"))
+	if err != nil {
+		configCache.Close()
+		_ = closeDependencies()
+		return nil, fmt.Errorf("create file service: %w", err)
+	}
 	deps := httpx.Dependencies{Logger: log, AllowedOrigins: strings.Split(os.Getenv("OWOT_CORS_ORIGINS"), ",")}
-	handler, iam, permissions, err := newBackendHandler(db, store, client, configs, deps, os.Getenv("OWOT_AVATAR_DIR"))
+	handler, iam, permissions, err := newBackendHandler(db, store, client, configs, files, deps, os.Getenv("OWOT_AVATAR_DIR"))
 	if err != nil {
 		configCache.Close()
 		_ = closeDependencies()

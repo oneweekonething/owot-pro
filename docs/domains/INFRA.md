@@ -83,9 +83,9 @@ internal/infra/
 | **参数配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/config/{create,update,delete,delete-list,get,page,export,export-excel}` | 系统租户账号 + `infra:config:*` | 全局参数配置 CRUD、批量删除、分页与 XLSX 导出 |
 | **管理端配置值** | `GET` | `/admin-api/infra/config/get-value-by-key` | 已登录 | 按 Key 读取可见参数 |
 | **C端配置** | `GET` | `/app-api/infra/config/get-value-by-key` | `PermitAll` + `TenantIgnore` | 移动端读取公开参数（仅允许 `visible=true`） |
-| **文件配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/file-config/{create,update,update-master,delete,get,page,test}` | `infra:file-config:*` | 文件配置 CRUD、设为主配置、测试上传连通性 |
-| **文件服务** | `POST / GET / DELETE` | `/admin-api/infra/file/{upload,presigned-url,create,delete,page}` | 已登录 / `infra:file:*` | 后端上传文件、获取 S3 预签名 URL、前端直传完成登记、删除文件、文件分页 |
-| **文件读取** | `GET` | `/admin-api/infra/file/:configId/get/*path` | `PermitAll` + `TenantIgnore` | DB / 本地磁盘存储模式下的文件二进制流直读端点 |
+| **文件配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/file-config/{create,update,update-master,delete,delete-list,get,page,test}` | `infra:file-config:*` | 文件配置 CRUD、设为主配置、测试上传连通性 |
+| **文件服务** | `POST / GET / DELETE` | `/admin-api/infra/file/{upload,presigned-url,create,delete,delete-list,page}` | 已登录 / `infra:file:*` | 后端上传文件、获取 S3 预签名 URL、前端直传完成登记、删除文件、文件分页 |
+| **文件读取** | `GET / HEAD` | `/admin-api/infra/file/:configId/get/*path` | `PermitAll` + `TenantIgnore` | 按配置编号读取已登记文件 |
 | **定时任务** | `POST/PUT/DELETE/GET` | `/admin-api/infra/job/{create,update,update-status,trigger,delete,get,page,export-excel}` | `infra:job:*` | 定时任务 CRUD、暂停/恢复、立即执行一次、分页与导出 |
 | **任务日志** | `GET` | `/admin-api/infra/job-log/{get,page,export-excel}` | `infra:job:query` | 定时任务执行日志详情、分页与导出 |
 | **访问日志** | `GET` | `/admin-api/infra/api-access-log/{page,export-excel}` | `infra:api-access-log:*` | API 访问日志分页与导出 |
@@ -95,3 +95,12 @@ internal/infra/
 参数配置表由 `migrations/mysql/003_infra_config.sql` 创建。升级已有部署时在启动前执行该迁移，并运行 `go run ./cmd/api -seed -check` 补齐配置类型和可见性字典。本地开发可用 `go run ./cmd/api -migrate -seed -check` 初始化。
 
 管理接口创建自定义项，更新时保留原类型。数据库根据配置键和软删除状态生成唯一键，SQL 初始化内置项时填写业务字段即可。内置项禁止删除，批量删除遇到内置项时整批回滚。服务内调用方可通过 `ConfigService.Value(ctx, key)` 读取参数，包括不可见项。修改与 `infra.config.refresh` 事件同事务写入，每次投递生成新的 Redis 缓存版本，内部读取按版本校验 30 秒本地缓存，Redis 不可用时回源 SQL。两端的按键接口直接从数据库同时读取值和可见性。C 端对缺失和隐藏的键都返回 `data: null`。
+
+### 文件存储部署
+
+升级时执行 [004_infra_file.sql](../../migrations/mysql/004_infra_file.sql)，再运行 `go run ./cmd/api -seed -check` 添加存储器字典。迁移会初始化编号为 1 的 DB 主配置。系统超级管理员可测试存储、修改配置和切换主配置。文件列表及删除按当前租户隔离。主配置和仍有文件或有效直传预约的配置受删除保护。主配置切换与 Outbox 事件同事务提交，文件继续由写入时的配置提供读取。
+
+- 本地存储的 `basePath` 位于 `OWOT_FILE_DIR`（默认 `data/infra-files`）内，配置之间使用独立子目录。多个服务实例使用本地存储时，共享同一持久卷。
+- 后端上传和直传登记均限制为 20 MiB。S3 直传需要浏览器能访问 `endpoint`，并在 bucket 配置允许前端源站发起 PUT 的 CORS 规则。预签名 PUT 有效期为 10 分钟，写入 `_upload/` 前缀。按上传者和实际内容登记后，服务写入最终对象。预览请求可等待登记，最长 15 秒。20 MiB 限额在登记时校验，浏览器发起的 PUT 由 bucket 接收。为 `_upload/` 配置生命周期过期规则，以清理未登记及重复 PUT 的临时对象。
+- 同源部署可由前端代理 `/admin-api/infra/file/`。前后端分离时，将 `OWOT_FILE_PUBLIC_URL` 设为浏览器能访问的后端地址，DB 和本地配置的 `domain` 可覆盖此值。私有 S3 文件通过 24 小时签名链接读取，重新打开文件列表可获取新链接。S3 公开配置填写 `domain` 时可返回对象直链，bucket 的公开读取策略仅覆盖最终对象，排除 `_upload/`。头像使用稳定的 API 地址。
+- S3 配置详情以占位符显示密钥，编辑保留占位符或留空时沿用现有密钥。测试接口返回一条可下载的样例文件，样例可从文件列表删除。存储删除失败时，文件仍在管理列表中供重试，API 下载在此期间停用。

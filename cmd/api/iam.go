@@ -12,7 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
-	"oneweekonething.com/owot-pro/internal/iam/adapter/avatar"
 	iamcache "oneweekonething.com/owot-pro/internal/iam/adapter/cache"
 	iamhttp "oneweekonething.com/owot-pro/internal/iam/adapter/http"
 	iampersistence "oneweekonething.com/owot-pro/internal/iam/adapter/persistence"
@@ -36,7 +35,7 @@ func iamRepositories(db *gorm.DB) iamapp.Repositories {
 	return iamapp.Repositories{Users: iampersistence.NewUserRepository(db), Depts: iampersistence.NewDeptRepository(db), Posts: iampersistence.NewPostRepository(db), Roles: iampersistence.NewRoleRepository(db), Menus: iampersistence.NewMenuRepository(db), Tenants: iampersistence.NewTenantRepository(db), Packages: iampersistence.NewPackageRepository(db), Clients: iampersistence.NewClientRepository(db), Links: iampersistence.NewAssociations(db), Tokens: iampersistence.NewTokenRepository(db), Locks: iampersistence.NewLocker(db)}
 }
 
-func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalClient, config *infraapp.ConfigService, deps httpx.Dependencies, avatarDirectory string) (http.Handler, *iamapp.Service, *iamcache.Permissions, error) {
+func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalClient, config *infraapp.ConfigService, files *infraapp.FileService, deps httpx.Dependencies, avatarDirectory string) (http.Handler, *iamapp.Service, *iamcache.Permissions, error) {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
@@ -54,7 +53,7 @@ func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalC
 	if avatarDirectory == "" {
 		avatarDirectory = filepath.Join("data", "iam-avatars")
 	}
-	service := iamapp.NewService(iamapp.Dependencies{Repositories: repos, Tx: tx, Outbox: store, Hasher: security.NewPasswordHasher(), TokenCache: iamcache.NewTokens(client, deps.Logger), Permissions: permissions, LoginLogs: &iamLoginRecorder{audit: audit}, Avatars: &avatar.Local{Directory: avatarDirectory}})
+	service := iamapp.NewService(iamapp.Dependencies{Repositories: repos, Tx: tx, Outbox: store, Hasher: security.NewPasswordHasher(), TokenCache: iamcache.NewTokens(client, deps.Logger), Permissions: permissions, LoginLogs: &iamLoginRecorder{audit: audit}, Avatars: &infraAvatars{files: files}})
 	iamHandler := iamhttp.NewHandler(service, deps.Logger, systemhttp.NewDictionaryTranslator(dicts))
 	deps.Tokens, deps.Permissions, deps.Tenants, deps.DataPermissions = iamHandler, service, service, service
 	deps.Operations = systemhttp.NewOperationRecorder(audit)
@@ -63,6 +62,7 @@ func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalC
 	systemhttp.NewHandler(dicts, notices, audit, deps.Logger).Register(router)
 	iamHandler.Register(router)
 	infrahttp.NewConfigHandler(config, deps.Logger).Register(router)
+	infrahttp.NewFileHandler(files, deps.Logger).Register(router)
 	avatarName := regexp.MustCompile(`^[0-9a-f]{32}\.(png|jpeg|gif)$`)
 	router.Handle(http.MethodGet, "/admin-api/system/user/profile/avatar/:name", httpx.Route{PermitAll: true, TenantIgnore: true}, func(c *gin.Context) {
 		name := c.Param("name")

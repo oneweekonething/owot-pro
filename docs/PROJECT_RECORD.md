@@ -6,11 +6,24 @@
 | :--- | :--- | :--- | :--- |
 | Phase 0 | 2026-11-04 | 分析原始 `yudao-go-docs`（DOC-00 ~ DOC-08），明确一期范围：管理后台用户体系 + 基础模块组件 | ✅ 已完成 |
 | Phase 1 | 2026-11-05 | 按照《Go 项目工程目录结构设计规范 1.2》完成架构文档、修复 6 项 Review 问题，并落地最小可验证工程骨架（`Makefile`、`.golangci.yml`、`cmd/api`、架构守卫单测、干净 `go.mod`） | ✅ 已完成 |
-| Phase 2 | 2026-11-05 起 | 已实现 System 字典、公告和审计日志，IAM 认证、组织、RBAC/数据权限、租户套餐与 OAuth2，以及 Infra 参数配置 | 🚧 进行中 |
+| Phase 2 | 2026-11-05 起 | 已实现 System 字典/公告/日志，IAM 认证/组织/RBAC/多租户/OAuth2，以及 Infra 参数配置与多云文件存储（DB/本地/S3/直传/头像集成） | 🚧 进行中 |
 
 ---
 
 ## 二、开发与 Review 进展记录
+
+### 2026-11-05：Infra 多云文件存储与头像集成
+- **实现范围**：
+  - 落地 `infra_file_config`、`infra_file` 与 `infra_file_content` 三张表及版本化迁移（`004_infra_file.sql`），内置 `infra_file_storage` 存储器字典（DB=1、Local=10、S3=20）。
+  - 支持多云存储引擎抽象：数据库 LONGBLOB 存储、基于 Go 1.24+ `os.OpenRoot` 沙箱隔离的本地磁盘存储、以及基于 MinIO Client 的 S3 对象存储。
+  - 支持后端中转上传、文件安全读取（`X-Content-Type-Options: nosniff`、`CSP: sandbox` 与非安全 MIME 强制附件下载防 XSS）、S3 预签名前端直传（两阶段 `_upload/` 暂存隔离 + 幂等登记防重放）、主配置热切换与删除保护。
+  - 架构解耦：移除 IAM 本地头像存储硬编码，通过 `AvatarUploader` 契约桥接到 Infra 当前主文件存储，同时兼容旧版头像本地只读路由。
+- **一致性与并发安全**：
+  - 基于 MySQL VIRTUAL 生成列 `master_slot` 配合唯一索引，在数据库引擎级杜绝多主配置并发冲突。
+  - 主配置切换采用行锁互斥（UPDATE 锁），上传事务采用共享锁（SHARE 锁），实现高频并发上传互不阻塞、切主原子安全。
+  - 配置与切主变更通过 Transactional Outbox 发布 `infra.file-config.refresh` 事件，Redis 版本更新驱动各节点 S3 客户端热重建。
+  - 上传失败时尝试清理未提交的物理对象。进程崩溃或补偿失败时，最终对象可能需要人工核对清理。
+- 验证覆盖 `make check`、MySQL/Redis 并发切主与上传，以及 S3 直传、预览等待、私有链接和删除重试。
 
 ### 2026-11-05：Infra 参数配置
 - 已接入全局配置 CRUD、批量删除、分页、XLSX 导出和两端可见值查询。系统租户的管理权限保护私有值，内置项受删除保护。
