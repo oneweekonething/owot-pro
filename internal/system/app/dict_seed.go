@@ -24,6 +24,8 @@ func (s *DictService) SeedDefaults(ctx context.Context) error {
 		{"登录日志类型", "system_login_type", []seedItem{{"账号登录", "100"}, {"主动登出", "200"}, {"强制退出", "202"}}},
 		{"登录结果", "system_login_result", []seedItem{{"成功", "0"}, {"账号或密码不正确", "10"}, {"用户被禁用", "20"}}},
 		{"用户类型", "user_type", []seedItem{{"管理后台用户", "1"}, {"会员用户", "2"}}},
+		{"参数配置类型", "infra_config_type", []seedItem{{"系统内置", "1"}, {"自定义", "2"}}},
+		{"是否可见", "infra_boolean_string", []seedItem{{"可见", "true"}, {"不可见", "false"}}},
 	}
 	for _, def := range defaults {
 		_, err := s.CreateType(ctx, domain.DictType{Name: def.name, Type: def.typ})

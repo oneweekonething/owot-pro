@@ -80,7 +80,8 @@ internal/infra/
 
 | 子域 | HTTP 方法 | 路由路径 | 权限标识 / 选项 | 功能说明 |
 | :--- | :--- | :--- | :--- | :--- |
-| **参数配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/config/{create,update,delete,get,get-value-by-key,page,export}` | `infra:config:*` | 参数配置 CRUD、按 Key 查询可见参数值、分页与导出 |
+| **参数配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/config/{create,update,delete,delete-list,get,page,export,export-excel}` | 系统租户账号 + `infra:config:*` | 全局参数配置 CRUD、批量删除、分页与 XLSX 导出 |
+| **管理端配置值** | `GET` | `/admin-api/infra/config/get-value-by-key` | 已登录 | 按 Key 读取可见参数 |
 | **C端配置** | `GET` | `/app-api/infra/config/get-value-by-key` | `PermitAll` + `TenantIgnore` | 移动端读取公开参数（仅允许 `visible=true`） |
 | **文件配置** | `POST/PUT/DELETE/GET` | `/admin-api/infra/file-config/{create,update,update-master,delete,get,page,test}` | `infra:file-config:*` | 文件配置 CRUD、设为主配置、测试上传连通性 |
 | **文件服务** | `POST / GET / DELETE` | `/admin-api/infra/file/{upload,presigned-url,create,delete,page}` | 已登录 / `infra:file:*` | 后端上传文件、获取 S3 预签名 URL、前端直传完成登记、删除文件、文件分页 |
@@ -90,3 +91,7 @@ internal/infra/
 | **访问日志** | `GET` | `/admin-api/infra/api-access-log/{page,export-excel}` | `infra:api-access-log:*` | API 访问日志分页与导出 |
 | **错误日志** | `PUT / GET` | `/admin-api/infra/api-error-log/{update-status,page,export-excel}` | `infra:api-error-log:*` | API 错误日志分页、导出与标记已处理/已忽略 |
 | **Redis 监控** | `GET` | `/admin-api/infra/redis/get-monitor-info` | `infra:redis:get-monitor-info` | 返回 `{info, dbSize, commandStats}` |
+
+参数配置表由 `migrations/mysql/003_infra_config.sql` 创建。升级已有部署时在启动前执行该迁移，并运行 `go run ./cmd/api -seed -check` 补齐配置类型和可见性字典。本地开发可用 `go run ./cmd/api -migrate -seed -check` 初始化。
+
+管理接口创建自定义项，更新时保留原类型。数据库根据配置键和软删除状态生成唯一键，SQL 初始化内置项时填写业务字段即可。内置项禁止删除，批量删除遇到内置项时整批回滚。服务内调用方可通过 `ConfigService.Value(ctx, key)` 读取参数，包括不可见项。修改与 `infra.config.refresh` 事件同事务写入，每次投递生成新的 Redis 缓存版本，内部读取按版本校验 30 秒本地缓存，Redis 不可用时回源 SQL。两端的按键接口直接从数据库同时读取值和可见性。C 端对缺失和隐藏的键都返回 `data: null`。

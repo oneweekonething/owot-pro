@@ -6,19 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	"gorm.io/gorm/logger"
 
 	iamcache "oneweekonething.com/owot-pro/internal/iam/adapter/cache"
 	"oneweekonething.com/owot-pro/internal/iam/adapter/persistence"
@@ -61,54 +56,7 @@ func (l *iamObservedLocker) LockTenant(ctx context.Context, id int64) error {
 
 func realIAM(t *testing.T) (*gorm.DB, *redis.Client, *app.Service, *outbox.Store, *iamFaultBroadcaster) {
 	t.Helper()
-	base, client := realSystemDependencies(t)
-	// An isolated schema proves the checked-in DDL itself, independently of
-	// AutoMigrate or earlier runs. The test DSN needs CREATE/DROP DATABASE rights.
-	name := fmt.Sprintf("owot_iam_%d", time.Now().UnixNano())
-	if err := base.Exec("CREATE DATABASE `" + name + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_bin").Error; err != nil {
-		t.Fatal(err)
-	}
-	config, err := mysqldriver.ParseDSN(os.Getenv("OWOT_TEST_MYSQL_DSN"))
-	if err != nil {
-		t.Fatal("invalid test DSN")
-	}
-	config.DBName, config.ParseTime, config.Loc = name, true, time.UTC
-	db, err := gorm.Open(mysql.Open(config.FormatDSN()), &gorm.Config{TranslateError: true, Logger: logger.Default.LogMode(logger.Silent), NowFunc: func() time.Time { return time.Now().UTC() }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = sqlDB.Close()
-		if err := base.Exec("DROP DATABASE `" + name + "`").Error; err != nil {
-			t.Error(err)
-		}
-	})
-	if err := dbx.Install(db); err != nil {
-		t.Fatal(err)
-	}
-	for _, filename := range []string{"001_system.sql", "002_iam.sql"} {
-		ddl, err := os.ReadFile("../../migrations/mysql/" + filename)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lines := []string{}
-		for _, line := range strings.Split(string(ddl), "\n") {
-			if !strings.HasPrefix(strings.TrimSpace(line), "--") {
-				lines = append(lines, line)
-			}
-		}
-		for _, statement := range strings.Split(strings.Join(lines, "\n"), ";") {
-			if strings.TrimSpace(statement) != "" {
-				if err := db.Exec(statement).Error; err != nil {
-					t.Fatalf("apply %s: %v", filename, err)
-				}
-			}
-		}
-	}
+	db, client := realSchema(t, "iam", "001_system.sql", "002_iam.sql")
 	if err := persistence.CheckSchema(db); err != nil {
 		t.Fatal(err)
 	}

@@ -16,8 +16,8 @@ go run ./cmd/api -migrate -seed -check
 go run ./cmd/api -addr :48080
 ```
 
-- `-migrate` 显式初始化开发表；生产环境应依次执行 `migrations/mysql/001_system.sql`、`002_iam.sql`。
-- `-seed` 初始化缺失的 9 类基础字典（含 IAM 性别、数据权限、角色与菜单枚举）及 IAM 默认数据，可重复运行，保留已有名称、状态和数据项修改。
+- `-migrate` 显式初始化开发表。生产环境应按编号执行 `migrations/mysql/` 中的迁移。
+- `-seed` 初始化缺失的基础字典及 IAM 默认数据，包括 IAM 枚举和 Infra 的配置类型、可见性选项。可重复运行，保留已有名称、状态和数据项修改。
 - `-check` 校验连接、表存在性与依赖组装后退出；不会启动监听与 Relay。
 - 不配置 MySQL/Redis 时保留原来的健康检查模式；只配置其中一项会报错。
 - 配置通过环境变量读取，程序不会自动加载 `.env`。数据库时间统一存储为 UTC，前端字符串时间区间按 Asia/Shanghai 解析。

@@ -19,7 +19,7 @@ func main() {
 	var (
 		addr      = flag.String("addr", ":48080", "HTTP listen address")
 		checkOnly = flag.Bool("check", false, "validate startup wiring and exit")
-		migrate   = flag.Bool("migrate", false, "initialize IAM and System tables (development only)")
+		migrate   = flag.Bool("migrate", false, "initialize backend tables (development only)")
 		seed      = flag.Bool("seed", false, "initialize missing IAM and System defaults")
 	)
 	flag.Parse()

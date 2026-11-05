@@ -19,6 +19,8 @@ import (
 	"oneweekonething.com/owot-pro/internal/iam/adapter/security"
 	iamapp "oneweekonething.com/owot-pro/internal/iam/app"
 	iamdomain "oneweekonething.com/owot-pro/internal/iam/domain"
+	infrahttp "oneweekonething.com/owot-pro/internal/infra/adapter/http"
+	infraapp "oneweekonething.com/owot-pro/internal/infra/app"
 	"oneweekonething.com/owot-pro/internal/platform/ctxmeta"
 	"oneweekonething.com/owot-pro/internal/platform/dbx"
 	"oneweekonething.com/owot-pro/internal/platform/httpx"
@@ -34,7 +36,7 @@ func iamRepositories(db *gorm.DB) iamapp.Repositories {
 	return iamapp.Repositories{Users: iampersistence.NewUserRepository(db), Depts: iampersistence.NewDeptRepository(db), Posts: iampersistence.NewPostRepository(db), Roles: iampersistence.NewRoleRepository(db), Menus: iampersistence.NewMenuRepository(db), Tenants: iampersistence.NewTenantRepository(db), Packages: iampersistence.NewPackageRepository(db), Clients: iampersistence.NewClientRepository(db), Links: iampersistence.NewAssociations(db), Tokens: iampersistence.NewTokenRepository(db), Locks: iampersistence.NewLocker(db)}
 }
 
-func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalClient, deps httpx.Dependencies, avatarDirectory string) (http.Handler, *iamapp.Service, *iamcache.Permissions, error) {
+func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalClient, config *infraapp.ConfigService, deps httpx.Dependencies, avatarDirectory string) (http.Handler, *iamapp.Service, *iamcache.Permissions, error) {
 	if deps.Logger == nil {
 		deps.Logger = slog.Default()
 	}
@@ -60,6 +62,7 @@ func newBackendHandler(db *gorm.DB, store *outbox.Store, client redis.UniversalC
 	router.Handle(http.MethodGet, "/actuator/health", httpx.Route{PermitAll: true, TenantIgnore: true}, health)
 	systemhttp.NewHandler(dicts, notices, audit, deps.Logger).Register(router)
 	iamHandler.Register(router)
+	infrahttp.NewConfigHandler(config, deps.Logger).Register(router)
 	avatarName := regexp.MustCompile(`^[0-9a-f]{32}\.(png|jpeg|gif)$`)
 	router.Handle(http.MethodGet, "/admin-api/system/user/profile/avatar/:name", httpx.Route{PermitAll: true, TenantIgnore: true}, func(c *gin.Context) {
 		name := c.Param("name")

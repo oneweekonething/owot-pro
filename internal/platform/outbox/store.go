@@ -48,13 +48,17 @@ func NewRedisBroadcaster(client redis.UniversalClient) *RedisBroadcaster {
 	return &RedisBroadcaster{client: client}
 }
 
+func VersionKey(topic string, tenantID int64) string {
+	return fmt.Sprintf("%s:version:%d", topic, tenantID)
+}
+
 func (b *RedisBroadcaster) Broadcast(ctx context.Context, event Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
 	_, err = b.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.Incr(ctx, fmt.Sprintf("%s:version:%d", event.Topic, event.TenantID))
+		pipe.Incr(ctx, VersionKey(event.Topic, event.TenantID))
 		pipe.Publish(ctx, event.Topic, data)
 		return nil
 	})

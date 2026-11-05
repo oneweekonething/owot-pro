@@ -23,10 +23,10 @@ import (
 	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 
-	iamcache "oneweekonething.com/owot-pro/internal/iam/adapter/cache"
 	iampersistence "oneweekonething.com/owot-pro/internal/iam/adapter/persistence"
 	iamapp "oneweekonething.com/owot-pro/internal/iam/app"
 	iamdomain "oneweekonething.com/owot-pro/internal/iam/domain"
+	infrapersistence "oneweekonething.com/owot-pro/internal/infra/adapter/persistence"
 	"oneweekonething.com/owot-pro/internal/platform/ctxmeta"
 	"oneweekonething.com/owot-pro/internal/platform/dbx"
 	"oneweekonething.com/owot-pro/internal/platform/excelx"
@@ -55,7 +55,7 @@ type iamEnvelope struct {
 func newIAMFixture(t *testing.T) *iamFixture {
 	t.Helper()
 	db := testhelper.SQLite(t)
-	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, outbox.Migrate} {
+	for _, migrate := range []func(*gorm.DB) error{iampersistence.Migrate, systempersistence.Migrate, infrapersistence.Migrate, outbox.Migrate} {
 		if err := migrate(db); err != nil {
 			t.Fatal(err)
 		}
@@ -64,8 +64,13 @@ func newIAMFixture(t *testing.T) *iamFixture {
 	client := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	store := outbox.NewStore(db, iamcache.NewBroadcaster(client), log)
-	handler, service, cache, err := newBackendHandler(db, store, client, httpx.Dependencies{Logger: log}, t.TempDir())
+	store := outbox.NewStore(db, newBackendBroadcaster(client), log)
+	configs, configCache, err := newConfigService(db, store, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(configCache.Close)
+	handler, service, cache, err := newBackendHandler(db, store, client, configs, httpx.Dependencies{Logger: log}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
